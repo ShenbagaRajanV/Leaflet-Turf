@@ -1,0 +1,192 @@
+<div id="map"></div>
+<div ><label for="slider">
+
+<label id="result"></label>
+      </label><input oninput="rangelabel()" id='slider' type="range" name="points" min="1" max="5"  onchange="showVal(this.value)"></div>
+<br />
+    <style>
+
+      html { height: 100% }
+      body { height: 100%; margin: 0; padding: 0;}
+      #map{ height: 85% }
+
+      </style>
+
+<link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.css"/>
+  <script src="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.js"></script>
+  <script type="text/javascript" src="http://code.jquery.com/jquery-1.9.1.js"></script>`
+  <script src="http://rawgit.com/dwilhelm89/LeafletSlider/master/dist/leaflet.SliderControl.min.js"></script>
+  <link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/themes/smoothness/jquery-ui.css" type="text/css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js" type="text/javascript"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+<script src="https://api.tiles.mapbox.com/mapbox.js/plugins/turf/v3.0.11/turf.min.js"></script>
+<script src="./leaflet-ajax-gh-pages/dist/leaflet.ajax.min.js"></script>
+
+<script>
+var m= L.map('map').setView([77,15], 5);
+var slide=1;
+
+var mapQuestAttr = 'Tiles Courtesy of <a href="http://www.mapquest.com/">MapQuest</a> &mdash; ';
+var osmDataAttr = 'Map data &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+var mopt =new L.TileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        { attribution: 'Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors' }
+        );
+var osm = L.tileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:osmDataAttr});
+var mq=L.tileLayer(mopt.url,mopt.options);
+
+mopt.addTo(m);
+var myStyle = {
+        
+        "weight": 55,
+        "opacity": 0.65
+    };
+var geojsonLayer1 = new L.GeoJSON.AJAX("http://localhost:8080/geoserver/ABHI/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=ABHI:bbmpwards&maxFeatures=300&outputFormat=application%2Fjson",{dataType:"json"},{
+         style:myStyle});       
+geojsonLayer1.addTo(m);
+var geojsonLayer = new L.GeoJSON.AJAX("http://localhost:8080/geoserver/ABHI/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=ABHI:abhi&maxFeatures=300&outputFormat=application%2Fjson",{dataType:"json"},{style:myStyle});       
+geojsonLayer.addTo(m);
+
+
+function showVal(Str){
+  slide = Str;
+calculateBuffer();
+calculateIntersect();
+}
+function rangelabel() {
+    var x = document.getElementById("slider").value; //get current range value
+    document.getElementById("result").innerHTML = x+"Km"; // display current range value in #result
+}
+
+
+var group = new L.featureGroup().addTo(m);
+var geojsonLayer;
+var bufferlayers =L.geoJson().addTo(m);
+var intersectlayers =L.geoJson().addTo(m);
+var bufferLayer = new L.featureGroup().addTo(m);
+
+geojsonLayer.eachLayer(function(layer) {
+    //pts
+      // layer.options.draggable == true;
+      // layer.on('drag', function(e) {
+      //     calculateBuffer();
+      // });
+    ///lines and polys
+    if(layer.editing){
+        layer.editing.enable();
+        layer.on('edit', function(e) {
+            calculateBuffer();
+             //calculateIntersect();
+        });
+    }
+});
+function handleJson(data) {
+  
+    geojsonLayer=L.geoJson(data, {
+        onEachFeature: function (feature, my_Layer) {
+						
+						my_Layer.bindPopup("Type: "+feature.properties.type+"<br />Speciality: "+feature.properties.speciality+"<br />Phase: "+feature.properties.phase);
+					  },
+        pointToLayer: function (feature, latlng) {
+            //return L.circleMarker(latlng, geojsonMarkerOptions);
+			return L.circleMarker(latlng
+			);
+            //return L.marker(latlng);
+        }
+    }).addTo(group);
+	m.fitBounds(group.getBounds());
+ 
+}
+
+//calculateBuffer();
+var buffer;
+function calculateBuffer() {
+
+  bufferlayers.clearLayers();
+    var fc1 = turf.featureCollection(geojsonLayer.getLayers().map(function(f){
+            return f.toGeoJSON()
+        }));
+    
+
+    buffer = turf.buffer(fc1, slide, 'kilometers');
+    
+   bufferlayers.addData(buffer,{style:myStyle})
+   bufferlayers.setStyle({fillColor :'red',color: "#000",weight: 10})
+
+ }
+
+function UnionWholeFC(fc){
+    var result; //empty polygon
+    if (fc["type"]==="FeatureCollection"){
+      //loop over the features
+      for (var i = fc['features'].length - 1; i >= 0; i--) {
+        var feature=fc['features'][i];
+        //now check if it is polygon
+        if ((feature["geometry"]["type"]=="Polygon")||(feature["geometry"]["type"]=="MultiPolygon")){
+          //now we can convert
+          var poly=getPolygonFeature(feature);
+          if(result){
+            //add
+            result=turf.union(result, poly);
+          }else{
+            //this is the fist polygon
+            result=poly;
+          }
+          
+        }
+      };
+    }
+    return result;
+  }
+
+  function getPolygonFeature(feature){
+  if (feature["geometry"]["type"]=="Polygon"){
+    return feature;
+  }else if (feature["geometry"]["type"]=="MultiPolygon"){
+    var poly;
+    var rings=feature["geometry"]["coordinates"];
+      //now iterate over the  rings
+      for (var i = rings.length - 1; i >= 0; i--) {
+        var ring=rings[i];
+        var ringPoly=turf.polygon(ring);
+        //each ring is a polygon
+        if(poly){
+          //exists, hence just union
+          poly=turf.union(poly, ringPoly);
+        }else{
+          //first ring
+          poly=ringPoly;
+        }
+      };
+      return poly;
+    }
+  }
+
+function calculateIntersect(){
+  
+intersectlayers.clearLayers();
+//bufferlayers.clearLayers();
+  var fc = turf.featureCollection(geojsonLayer1.getLayers().map(function(f){
+            return f.toGeoJSON()
+        }));
+  var result=UnionWholeFC(buffer);
+  var wards=UnionWholeFC(fc);
+  //intersectlayers.clearLayers()
+  
+   var polygon = turf.intersect(result,wards);
+
+
+ intersectlayers.addData(polygon);
+ intersectlayers.setStyle({weight: 20,color: 'blue'})
+
+var intersectingArea=turf.area(polygon);
+var wardArea=turf.area(wards)
+intersectlayers.addTo(m);
+console.log("Percentage Area: "+ (intersectingArea/wardArea)*100)
+console.log("WardArea:"+wardArea)
+}
+function getJson(data) {
+console.log("callback function fired");
+}
+
+</script>
+</html>
